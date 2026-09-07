@@ -19,7 +19,8 @@ UI = re.compile(r'[─│⏺⎿❯✻※⏵•]')
 # `claude --resume <uuid>`, printed on clean exit and present in our own launch line
 RESUME_ID = re.compile(r'--resume\s+([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}'
                        r'-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})')
-TAIL_BYTES = 600_000          # transcript tail scanned first (scrollback = end of session)
+CLAIM_MIN = 0.15              # min share of window text that must appear in a
+                              # session before its printed id is believed
 
 
 def shingles(text, n=8, pat=WORD):
@@ -119,21 +120,47 @@ def main():
     # and our own launch line carries the id too. That is authoritative, so use
     # it instead of scanning gigabytes. A crash never prints it, which is why
     # fingerprinting still exists below.
+    # The id is CORROBORATED, never trusted outright: a window can name a session
+    # it is no longer showing (resumed A then later ran B, a forked session, a
+    # resume that failed and was followed by a different one). So the claimed
+    # transcript is read and scored against the window like any other candidate.
+    # Below CLAIM_MIN the claim is rejected and the window falls through to full
+    # fingerprinting.
     for wid, text in list(windows.items()):
-        ids = RESUME_ID.findall(text)
-        for sid in reversed(ids):           # last mention = most recent
-            if sid in by_sid:
-                s = by_sid[sid]
-                plan[wid] = dict(sid=sid, cwd=s['cwd'], model=s['model'],
-                                 title=s['title'], confidence='EXACT',
-                                 overlap=100.0, endmatch=100.0,
-                                 restores=text.count('[Restored '),
-                                 stale=False, runner_up=None,
-                                 source='resume-line')
-                print(f"w{wid} -> {sid[:8]}  EXACT (session id printed in window)"
-                      f"  {str(s['title'])[:44]}")
-                del windows[wid]
-                break
+        wsh = shingles(text)
+        claimed = [s for s in reversed(RESUME_ID.findall(text)) if s in by_sid]
+        named_but_gone = [s for s in set(RESUME_ID.findall(text)) if s not in by_sid]
+        for sid in claimed:
+            s = by_sid[sid]
+            ratio = score_all({wid: wsh}, s['file'])[wid] / max(1, len(wsh))
+            if ratio < CLAIM_MIN:
+                print(f"w{wid} names {sid[:8]} but only {ratio*100:.1f}% of the "
+                      f"window's text is in it; rejecting the claim")
+                continue
+            tail_sh = shingles(text[-6000:], n=6, pat=WORD_L)
+            last_sh = shingles(s['last_asst'] or '', n=6, pat=WORD_L)
+            endmatch = len(tail_sh & last_sh) / max(1, len(last_sh))
+            # Recorded for information, but NOT used to flag staleness here.
+            # A cleanly exited window ends with exit output rather than the last
+            # message, so endmatch reads near zero even on a perfect match. The
+            # printed id is per-window evidence and settles it on its own; the
+            # endmatch heuristic exists only to catch a *fingerprint* landing on
+            # a session whose current end the window is not showing.
+            plan[wid] = dict(sid=sid, cwd=s['cwd'], model=s['model'],
+                             title=s['title'], confidence='EXACT',
+                             overlap=round(ratio * 100, 1),
+                             endmatch=round(endmatch * 100, 1),
+                             restores=text.count('[Restored '),
+                             stale=False, runner_up=None,
+                             source='resume-line')
+            print(f"w{wid} -> {sid[:8]}  EXACT (id printed in window, "
+                  f"{ratio*100:.0f}% text confirms)  {str(s['title'])[:40]}")
+            del windows[wid]
+            break
+        else:
+            if named_but_gone:
+                print(f"w{wid} names session {named_but_gone[0][:8]} but no "
+                      f"transcript exists for it (pruned); will fingerprint")
 
     # ---- Fingerprint whatever is left ------------------------------------
     if windows:

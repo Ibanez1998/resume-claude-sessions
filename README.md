@@ -31,9 +31,13 @@ sitting in each terminal window. So that is what this matches on.
    processes are `login, -zsh` is dead and a candidate.
 2. **Read the id if it is there.** A clean `/exit` prints `Resume this session
    with: claude --resume <id>` into the window. When that line is present the id
-   is taken straight from it and reported as `EXACT`, with no scanning at all.
-3. **Otherwise fingerprint.** A crash or battery kill never prints that line, so
-   for those windows the scrollback is scored against every transcript in
+   is read from it and then *corroborated*: that one transcript is scored against
+   the window, and the claim is only accepted if at least 15 percent of the
+   window's text is genuinely in it. A window naming a session it is no longer
+   showing gets rejected and falls through.
+3. **Otherwise fingerprint.** A crash, a battery kill, a pruned transcript, or a
+   rejected claim all land here, and the scrollback is scored against every
+   transcript in
    `~/.claude/projects/` using 8-word shingle overlap. The winner is normally 70
    to 95 percent overlap with a near-zero runner-up.
 4. **Sanity-check.** Compare each window's last visible message to that

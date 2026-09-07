@@ -61,10 +61,21 @@ python3 scripts/match.py <outdir>         # index transcripts, match, report
 prints a table with a confidence column. It works in two stages:
 
 **Fast path first.** A clean `/exit` prints `Resume this session with: claude
---resume <id>` into the window, so when that line is present the id is read
-straight out of the scrollback and reported as `EXACT`. No scanning. A crash or
-battery kill never prints it, which is the whole reason the fingerprinting below
-still exists.
+--resume <id>` into the window. When that line is present the id is read straight
+out of the scrollback, but it is **corroborated, not trusted**: only that one
+transcript is read and scored against the window, and the claim is accepted as
+`EXACT` only if at least `CLAIM_MIN` (15%) of the window's text is actually in
+it. Everything falls back to scrollback matching:
+
+| Situation | What happens |
+|---|---|
+| No id printed (crash, battery kill, `kill -9`) | Full fingerprinting |
+| Id printed, transcript pruned off disk | Reported, then full fingerprinting |
+| Id printed but wrong (stale, forked, resumed twice) | Claim rejected, next claimed id tried, then full fingerprinting |
+| Id printed and corroborated | `EXACT`, no further scanning |
+
+A window that named the wrong session scored 2.8% and was rejected; correct
+claims scored 19% to 86%.
 
 **Then fingerprinting**, for every window the fast path could not resolve. It:
 
@@ -148,6 +159,12 @@ excludes itself, and then wins its own matches.
 dumped 20 windows' scrollback into its own transcript, it contains verbatim text
 from every one of them and outscores the real sessions. Excluding only "self" is
 not enough once you have done this more than once.
+
+**Do not apply the staleness heuristic to an id-confirmed window.** A cleanly
+exited window ends with exit output rather than its last message, so `endmatch`
+reads near zero even on a perfect match and every window gets falsely flagged
+for review. That check exists only to catch a *fingerprint* landing on a session
+whose current end the window is not showing.
 
 **Pilot one window first.** Run a single low-stakes window end to end and
 confirm it comes up live before touching the other twenty.
