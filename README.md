@@ -44,9 +44,11 @@ sitting in each terminal window. So that is what this matches on.
    session's last message. A mismatch means the window is showing an older point
    of the conversation, which usually means it died in an earlier incident and
    may already be live in another window.
-5. **Resume.** Send `cd '<project dir>' && claude --resume <id>` into that same
-   window, answer Claude Code's "resume from summary or full" prompt, and verify
-   the session actually came up live.
+5. **Resume and prove it.** Send `cd '<project dir>' && claude --resume <id>`
+   into that same window, answer Claude Code's "resume from summary or full"
+   prompt, then confirm that session's transcript was actually written. A
+   running process is not proof: resuming from the wrong directory silently
+   opens a new empty session instead of erroring.
 
 ## What it does to your machine, before you run it
 
@@ -172,6 +174,11 @@ if that matters more to you than perfect recall.
 - **Invent a session that is gone.** Transcripts do get pruned. If nothing in a
   window appears in any transcript, it says so instead of resuming the closest
   thing.
+- **Claim success it did not verify.** Every project folder under
+  `~/.claude/projects/` is searched, not just one, and each window is launched
+  from the directory that session actually belongs to. If the intended session
+  did not load, it reports `NEEDS ATTENTION` and names the likely cause rather
+  than reporting the window as live.
 
 ## Requirements and limits
 

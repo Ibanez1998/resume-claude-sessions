@@ -39,7 +39,9 @@ def index_sessions(excl=()):
         sid = os.path.basename(f)[:-6]
         if any(sid.startswith(x) for x in excl):
             continue
-        title = start_cwd = model = last_asst = None
+        proj_dir = os.path.basename(os.path.dirname(f))
+        title = model = last_asst = None
+        cwds = []
         for line in open(f, errors='replace'):
             try:
                 o = json.loads(line)
@@ -47,8 +49,9 @@ def index_sessions(excl=()):
                 continue
             if o.get('type') == 'ai-title' and o.get('aiTitle'):
                 title = o['aiTitle']
-            if start_cwd is None and o.get('cwd'):
-                start_cwd = o['cwd']          # FIRST cwd: the project dir key
+            c = o.get('cwd')
+            if c and c not in cwds:
+                cwds.append(c)
             m = o.get('message')
             if isinstance(m, dict):
                 if m.get('model') and not m['model'].startswith('<'):
@@ -60,7 +63,25 @@ def index_sessions(excl=()):
                     ) if isinstance(c, list) else ''
                     if txt.strip():
                         last_asst = txt.strip()
-        out.append(dict(sid=sid, file=f, title=title, cwd=start_cwd,
+        # Which directory must `claude --resume <id>` be run from?
+        #
+        # Claude Code finds a session by encoding the CURRENT cwd and looking in
+        # the matching project directory, so the authority is the directory the
+        # transcript physically lives in, not anything inside the file. Encoding
+        # replaces "/" with "-", and decoding the name is ambiguous because a
+        # real "-" in a path is indistinguishable. So instead of decoding, take
+        # every cwd the session recorded and keep the one that re-encodes to the
+        # containing directory name.
+        #
+        # This matters for sessions that change directory mid-conversation: the
+        # session still belongs to the project directory it STARTED in, and a
+        # later cwd would send the resume to the wrong place.
+        cwd = next((c for c in cwds if c.replace('/', '-') == proj_dir), None)
+        cwd_trusted = cwd is not None
+        if cwd is None:
+            cwd = cwds[0] if cwds else os.path.expanduser('~')
+        out.append(dict(sid=sid, file=f, title=title, cwd=cwd,
+                        cwd_trusted=cwd_trusted, proj_dir=proj_dir,
                         model=model, last_asst=last_asst))
     return out
 
@@ -152,6 +173,7 @@ def main():
                              endmatch=round(endmatch * 100, 1),
                              restores=text.count('[Restored '),
                              stale=False, runner_up=None,
+                             cwd_trusted=s['cwd_trusted'],
                              source='resume-line')
             print(f"w{wid} -> {sid[:8]}  EXACT (id printed in window, "
                   f"{ratio*100:.0f}% text confirms)  {str(s['title'])[:40]}")
@@ -207,6 +229,7 @@ def main():
                              overlap=round(ratio * 100, 1), endmatch=round(endmatch * 100, 1),
                              restores=restores, stale=stale,
                              runner_up=runner[:8] if runner else None,
+                             cwd_trusted=s['cwd_trusted'],
                              source='fingerprint')
             flag = ''
             if stale:
@@ -232,6 +255,14 @@ def main():
                     plan[w]['note'] = f'collides with w{keep} on {sid[:8]}; needs manual review'
             print(f"\n!! {sid[:8]} matched windows {wids}: keeping w{keep}, "
                   f"quarantining {[w for w in wids if w != keep]} (resume ONE only)")
+
+    unsure = [w for w, p in plan.items() if not p.get('cwd_trusted', True)]
+    if unsure:
+        print("\n!! could not confirm the launch directory for "
+              f"{sorted(unsure, key=int)}. No recorded cwd re-encodes to the "
+              "project directory holding the transcript. Resuming from the wrong "
+              "directory silently starts a NEW session instead, so check the "
+              "'cwd' field in plan.json for these before running resume.sh.")
 
     low = [w for w, p in plan.items() if p['confidence'] == 'LOW' or p.get('stale')]
     if low:

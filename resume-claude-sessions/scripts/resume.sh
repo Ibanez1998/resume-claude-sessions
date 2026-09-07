@@ -37,9 +37,25 @@ for w,d in p.items():
 PY
 
 exec python3 - "$PLAN" "$NEW" "$RESUME_CHOICE" $WINS <<'PY'
-import subprocess, json, sys, time
+import subprocess, json, sys, time, glob, os
 plan=json.load(open(sys.argv[1])); new=sys.argv[2]=='1'; choice=sys.argv[3]
 wins=sys.argv[4:]
+started=time.time()
+
+def transcript(sid):
+    hits=glob.glob(os.path.expanduser(f'~/.claude/projects/*/{sid}.jsonl'))
+    return hits[0] if hits else None
+
+def really_loaded(sid):
+    """Proof the INTENDED session came up, not just that claude started.
+
+    Resuming from the wrong directory does not error: Claude Code cannot find
+    the id there and quietly opens a NEW session instead, which still shows a
+    running process and a normal prompt. The only honest signal is that this
+    session's own transcript got written during this run.
+    """
+    f=transcript(sid)
+    return bool(f) and os.path.getmtime(f) >= started
 
 def osa(s):
     try: return subprocess.run(['osascript','-e',s],capture_output=True,text=True,timeout=20).stdout
@@ -78,6 +94,23 @@ while time.time()<deadline and len(live)<len(wins):
         live.add(w); print(f"w{w} LIVE {plan[w]['sid'][:8]}  {plan[w].get('title')}", flush=True)
     time.sleep(3)
 
+# Give the last-started sessions a moment to write, then verify each one.
+unproven=[]
+for _ in range(10):
+    unproven=[w for w in live if not really_loaded(plan[w]['sid'])]
+    if not unproven: break
+    time.sleep(3)
+
 missing=[w for w in wins if w not in live]
-print(("all windows live" if not missing else f"NEEDS ATTENTION: {missing}"), flush=True)
+if missing:
+    print(f"NEEDS ATTENTION, never came up: {missing}", flush=True)
+if unproven:
+    print(f"NEEDS ATTENTION, claude is running but the intended session was "
+          f"NOT loaded (its transcript was never written): {sorted(unproven, key=int)}",
+          flush=True)
+    print("  Almost always the wrong launch directory. Check 'cwd' in plan.json "
+          "against the project folder holding that session's transcript.", flush=True)
+if not missing and not unproven:
+    print(f"all {len(live)} windows live, each confirmed by a fresh transcript write",
+          flush=True)
 PY

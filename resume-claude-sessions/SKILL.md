@@ -101,7 +101,9 @@ scripts/resume.sh --new <outdir> <winid>... # fresh windows instead
 ```
 
 Per window it sends `cd '<startup cwd>' && claude --resume <id>`, answers the
-"resume from summary vs full" prompt, and verifies the session came up live.
+"resume from summary vs full" prompt, and then verifies the session actually
+loaded by checking that **that session's transcript was written during the run**.
+A running process is not proof: see the launch-directory gotcha below.
 
 Ask the user which resume mode they want **before** running it: full-as-is on a
 dozen 300k+ token sessions consumes a real chunk of usage limits, and it is
@@ -110,13 +112,24 @@ full as-is, `1` = from summary).
 
 ## Gotchas (all of these were hit for real)
 
-**The `cd` is mandatory.** Restored shells start in `~`, not the project
-directory. Claude Code looks up a session id inside the project directory keyed
-to the *current* cwd, so `claude --resume <id>` from the wrong directory will
-not find the session. It silently starts a new session and, in an untrusted
-directory, stops on a "trust this folder" prompt. Always take the startup cwd
-from the **first** `cwd` field in the transcript, not the last: a session that
-`cd`s mid-conversation still belongs to the project directory it started in.
+**The `cd` is mandatory, and a wrong one fails SILENTLY.** Restored shells start
+in `~`, not the project directory. Claude Code finds a session id by encoding the
+*current* cwd and looking in the matching project directory, so `claude --resume
+<id>` from the wrong place does not error. It quietly opens a brand new empty
+session, which still shows a running process and a normal prompt. In an untrusted
+directory you at least get a "trust this folder" prompt; in a trusted one you get
+no signal at all.
+
+So never treat "claude is running" as success. Verify that the session's own
+transcript file was written during the run. That is the only honest proof the
+intended conversation loaded.
+
+To pick the directory, do not decode the project directory name: encoding maps
+`/` to `-`, so a real `-` in a path is ambiguous. Instead collect every `cwd` the
+transcript recorded and keep the one that re-encodes to the directory holding the
+file. That handles sessions which change directory mid-conversation, since the
+session still belongs to the project directory it STARTED in. If none matches,
+say so rather than guessing.
 
 **Never detect state by grepping the whole scrollback.** The buffer still holds
 the *old* status bar from before the crash, including `bypass permissions on
