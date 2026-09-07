@@ -89,10 +89,13 @@ Just say what happened:
 > My laptop died and I have 20 Terminal windows sitting at a prompt. Can you
 > match each one to its Claude session and resume them?
 
-Claude picks up the skill and walks the procedure. It will show you the match
-table before resuming anything, and it will ask whether you want full context or
-summaries, because resuming a dozen 300k-token sessions at full fidelity uses a
-real chunk of your usage limits.
+Claude picks up the skill and walks the procedure. Before it inspects anything
+it asks you two things up front: whether you want full context or summaries,
+because resuming a dozen 300k-token sessions at full fidelity uses a real chunk
+of your usage limits, and how you want it paced - resume everything once the
+matching is done, pilot one window first, or stop and show you the match table
+before touching a thing. After that it runs unattended, and only comes back to
+you if a window is genuinely ambiguous.
 
 ### Running the scripts directly
 

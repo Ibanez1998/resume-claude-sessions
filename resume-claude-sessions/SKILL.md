@@ -40,7 +40,30 @@ the text sitting in each window.
 
 ## Procedure
 
-### 1. Survey
+### 1. Ask the user first, before touching anything
+
+Do this **before** survey, dump, or match. None of it needs their answer, and
+all of it makes them wait. Ask in a single `AskUserQuestion`:
+
+1. **Resume mode** - from summary, or full session as-is. This is the one that
+   matters: full-as-is across twenty 300k+ token sessions consumes a real chunk
+   of usage limits, and it is their call, not yours. Recommend from-summary for
+   a large batch.
+2. **Pacing** - resume everything once matching is done, pilot one low-stakes
+   window first and check back, or stop and show them the match table before
+   resuming anything.
+
+Apply the resume-mode answer by editing `RESUME_CHOICE` at the top of
+`resume.sh` (`2` = full as-is, `1` = from summary).
+
+Ask these two up front and the normal run needs no further interruption. Still
+go back to the user mid-flow for a *genuinely ambiguous* window (see Ambiguity
+below); a scope question you could have asked at the start is not that.
+
+You cannot ask "which windows" yet, since nothing is matched. That is what the
+pacing answer is for.
+
+### 2. Survey
 
 ```bash
 scripts/survey.sh
@@ -50,7 +73,7 @@ Lists every Terminal window with its id, tty, and running processes. A window
 whose processes are only `login, -zsh` is dead and a candidate. Skip the window
 running the current Claude session.
 
-### 2. Dump scrollbacks and match
+### 3. Dump scrollbacks and match
 
 ```bash
 scripts/dump.sh <outdir> <winid>...       # capture each window's scrollback
@@ -91,9 +114,10 @@ claims scored 19% to 86%.
   message
 
 Review the table before acting. Anything below high confidence, or flagged, gets
-resolved by hand (see Ambiguity below).
+resolved by hand (see Ambiguity below). Show the table to the user if they asked
+for it at step 1; otherwise go straight on to resuming.
 
-### 3. Resume
+### 4. Resume
 
 ```bash
 scripts/resume.sh <outdir> <winid>...     # reattach mode
@@ -105,10 +129,8 @@ Per window it sends `cd '<startup cwd>' && claude --resume <id>`, answers the
 loaded by checking that **that session's transcript was written during the run**.
 A running process is not proof: see the launch-directory gotcha below.
 
-Ask the user which resume mode they want **before** running it: full-as-is on a
-dozen 300k+ token sessions consumes a real chunk of usage limits, and it is
-their call, not yours. Edit `RESUME_CHOICE` at the top of `resume.sh` (`2` =
-full as-is, `1` = from summary).
+`RESUME_CHOICE` should already be set from the step 1 answer. If you somehow
+reached here without asking, stop and ask now - do not pick for them.
 
 ## Gotchas (all of these were hit for real)
 
@@ -180,7 +202,11 @@ for review. That check exists only to catch a *fingerprint* landing on a session
 whose current end the window is not showing.
 
 **Pilot one window first.** Run a single low-stakes window end to end and
-confirm it comes up live before touching the other twenty.
+confirm it comes up live before touching the other twenty. Worth doing even when
+the user picked "resume everything" at step 1: it costs one window, and it is
+how you catch a wrong-cwd or trust-prompt problem before it hits all twenty.
+Piloting is sequencing, not a scope cut, so just do it and report - it is not a
+reason to go back and ask again.
 
 ## Ambiguity
 
