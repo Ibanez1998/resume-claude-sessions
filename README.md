@@ -40,6 +40,24 @@ sitting in each terminal window. So that is what this matches on.
    window, answer Claude Code's "resume from summary or full" prompt, and verify
    the session actually came up live.
 
+## What it does to your machine, before you run it
+
+This drives Terminal.app through AppleScript. Concretely, it will:
+
+- **read the scrollback** of the Terminal windows you point it at, and write
+  copies into the output directory you name
+- **type a command into those windows and press return**, specifically
+  `cd '<project dir>' && claude --resume <id>`
+- **send a single keystroke** to answer Claude Code's resume prompt
+
+It does not read or transmit anything outside your machine, and it makes no
+network calls of its own. But it is a downloaded script that types into your
+terminals, so read `scripts/resume.sh` before you trust it. It only ever touches
+window ids you pass on the command line.
+
+Nothing is destructive: the worst realistic outcome is a window that opens the
+wrong conversation, which you undo with `/exit` and one rerun.
+
 ## Install
 
 ```bash
@@ -66,17 +84,74 @@ table before resuming anything, and it will ask whether you want full context or
 summaries, because resuming a dozen 300k-token sessions at full fidelity uses a
 real chunk of your usage limits.
 
-You can also run the scripts directly:
+### Running the scripts directly
 
-```bash
-resume-claude-sessions/scripts/survey.sh
-resume-claude-sessions/scripts/dump.sh /tmp/rescue 110 111 112
-python3 resume-claude-sessions/scripts/match.py /tmp/rescue
-resume-claude-sessions/scripts/resume.sh /tmp/rescue
+**1. Find the dead windows.** A window whose processes are only `login, -zsh`
+has no Claude running and is a candidate. Skip the window you are working in.
+
+```
+$ scripts/survey.sh
+winid=675  tty=/dev/ttys021  procs=login-zshclaudenode      <- your live session, skip
+winid=110  tty=/dev/ttys001  procs=login-zsh                <- dead, recover this
+winid=111  tty=/dev/ttys002  procs=login-zsh                <- dead, recover this
+winid=112  tty=/dev/ttys003  procs=login-zsh                <- dead, recover this
 ```
 
-Add `--new` to `resume.sh` to open a fresh window per session instead of
-reattaching, for when the original windows are gone.
+**2. Capture and match.** Pass the dead window ids from step 1:
+
+```
+$ scripts/dump.sh /tmp/rescue 110 111 112
+w110: 6199 bytes
+w111: 7826 bytes
+w112: 7740 bytes
+
+$ python3 scripts/match.py /tmp/rescue
+3 windows vs 35 transcripts (excluding 009eaac1)
+w110 -> 9ad9a799  HIGH overlap= 83.5% end=100.0%  Onboard the new client account
+w111 -> 74784e7d  HIGH overlap= 91.9% end= 91.1%  Site redesign approved
+w112 -> 0a041851  LOW  overlap= 76.1% end=  0.0%  Scorecard landing page  [STALE? window
+                                                  may show an older point]  [restored 2x]
+
+!! review before resuming: ['112']
+wrote /tmp/rescue/plan.json
+```
+
+Read that table before going further. `overlap` is how much of the window's text
+was found in that transcript. `end` is whether the window shows the session's
+*current* end, so a low `end` means the window is showing an older point and
+probably died in an earlier incident. Anything `LOW` or flagged is skipped by
+default.
+
+**3. Resume.** With no window ids it does every window in the plan that is not
+flagged:
+
+```
+$ scripts/resume.sh /tmp/rescue
+  skipping w112 (0a041851) - flagged stale/duplicate
+w110 launched
+w111 launched
+w110 answered resume prompt
+w111 answered resume prompt
+w110 LIVE 9ad9a799  Onboard the new client account
+w111 LIVE 74784e7d  Site redesign approved
+all windows live
+```
+
+Add `--new` to open a fresh window per session instead of reattaching, for when
+the original windows are gone:
+
+```bash
+scripts/resume.sh --new /tmp/rescue
+```
+
+In `--new` mode you answer each window's resume prompt yourself.
+
+**Choosing full context or summaries.** Claude Code interrupts startup on old or
+large sessions to ask whether to resume the full conversation or a summary.
+`resume.sh` answers it for you, using `RESUME_CHOICE` at the top of the script:
+`2` for full as-is (the default), `1` for summary. Full fidelity across a dozen
+300k-token sessions uses a real chunk of your usage limits, so change it to `1`
+if that matters more to you than perfect recall.
 
 ## What it will not do
 
@@ -90,7 +165,7 @@ reattaching, for when the original windows are gone.
   window appears in any transcript, it says so instead of resuming the closest
   thing.
 
-## Requirements
+## Requirements and limits
 
 - macOS with Terminal.app. iTerm2 is not supported yet.
 - The controlling process needs AppleScript permission for Terminal. macOS
@@ -98,6 +173,44 @@ reattaching, for when the original windows are gone.
   Automation.
 - Claude Code transcripts in the default location,
   `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`.
+- **One tab per window.** `survey.sh` lists every tab, but `dump.sh` and
+  `resume.sh` act on each window's *selected* tab only. If you keep several
+  Claude sessions as tabs inside one window, only the frontmost tab of that
+  window is handled. This path is untested; the case it was built from had
+  exactly one tab per window.
+- Matching needs readable text in the window. If Terminal's scrollback limit has
+  already discarded the conversation, or the window was cleared, there is
+  nothing left to fingerprint.
+
+## Troubleshooting
+
+**"Terminal got an error: Application isn't running" or every command returns
+nothing.** AppleScript permission was denied. Grant it under System Settings,
+Privacy and Security, Automation, and enable Terminal for whichever app is
+driving the scripts.
+
+**A window stops on "Is this a project you created or one you trust?"** Claude
+launched in the wrong directory, which also means it did not find the session.
+Check the `cwd` recorded for that window in `plan.json`. Press return to pick
+"No, exit" and rerun.
+
+**A window sits on the resume prompt and nothing happens.** `resume.sh` polls
+for up to 30 minutes and reports `NEEDS ATTENTION` for any window it could not
+settle. Answer that window by hand with `1` or `2`.
+
+**It resumed the wrong conversation.** Type `/exit` in that window, then rerun
+`resume.sh` for just that window id after correcting its entry in `plan.json`.
+Nothing is lost: resuming does not modify a transcript beyond appending, and the
+session you wanted is still on disk.
+
+**A window matched nothing.** Its transcript is probably gone. Claude Code
+prunes old sessions, and project directories can end up holding zero `.jsonl`
+files. That session is not recoverable.
+
+**How do I confirm it really worked?** For each window, check that `claude` is
+in the tab's process list and that the session's transcript file has a fresh
+mtime. A new mtime is the real proof that the intended session loaded, rather
+than just that some process started.
 
 ## Notes for anyone adapting this
 
