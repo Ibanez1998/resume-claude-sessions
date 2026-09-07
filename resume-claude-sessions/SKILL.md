@@ -57,13 +57,25 @@ scripts/dump.sh <outdir> <winid>...       # capture each window's scrollback
 python3 scripts/match.py <outdir>         # index transcripts, match, report
 ```
 
-`match.py` writes `plan.json` (window → session id, startup cwd, model) and
-prints a table with a confidence column. It:
+`match.py` writes `plan.json` (window to session id, startup cwd, model) and
+prints a table with a confidence column. It works in two stages:
+
+**Fast path first.** A clean `/exit` prints `Resume this session with: claude
+--resume <id>` into the window, so when that line is present the id is read
+straight out of the scrollback and reported as `EXACT`. No scanning. A crash or
+battery kill never prints it, which is the whole reason the fingerprinting below
+still exists.
+
+**Then fingerprinting**, for every window the fast path could not resolve. It:
 
 - indexes every transcript (title, startup cwd, model, last message)
 - scores window text against transcript text using 8-word shingles
 - **excludes the current session's own transcript**, which contains the scrollback
-  you just dumped into it, and will otherwise win every match
+  you just dumped into it, and will otherwise win every match (auto-detected from
+  `$CLAUDE_CODE_SESSION_ID`; add more with `--exclude <id>`)
+- **auto-excludes rescue transcripts**: any transcript that is the top hit for 3
+  or more windows is a previous rescue session that quoted those windows into
+  its own transcript, not a real match
 - flags windows whose *last visible message* differs from the session's *last*
   message
 
@@ -127,6 +139,15 @@ unrecoverable. Say so plainly rather than resuming the closest match.
 **Markdown breaks exact-phrase verification.** Rendered scrollback text differs
 from the raw transcript (`**bold**`, list markers). Exact grep will miss; the
 shingle score is the primary signal and grep is only corroboration.
+
+**The self-exclusion env var is `CLAUDE_CODE_SESSION_ID`.** Not
+`CLAUDE_SESSION_ID`. Getting it wrong fails silently: the matcher simply never
+excludes itself, and then wins its own matches.
+
+**A previous rescue's transcript poisons the next run.** Once a session has
+dumped 20 windows' scrollback into its own transcript, it contains verbatim text
+from every one of them and outscores the real sessions. Excluding only "self" is
+not enough once you have done this more than once.
 
 **Pilot one window first.** Run a single low-stakes window end to end and
 confirm it comes up live before touching the other twenty.

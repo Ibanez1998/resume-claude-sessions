@@ -29,14 +29,18 @@ sitting in each terminal window. So that is what this matches on.
 
 1. **Survey.** Enumerate Terminal windows via AppleScript. A window whose only
    processes are `login, -zsh` is dead and a candidate.
-2. **Fingerprint.** Capture each window's scrollback and score it against every
-   transcript in `~/.claude/projects/` using 8-word shingle overlap. The winner
-   is normally 70 to 95 percent overlap with a near-zero runner-up.
-3. **Sanity-check.** Compare each window's last visible message to that
+2. **Read the id if it is there.** A clean `/exit` prints `Resume this session
+   with: claude --resume <id>` into the window. When that line is present the id
+   is taken straight from it and reported as `EXACT`, with no scanning at all.
+3. **Otherwise fingerprint.** A crash or battery kill never prints that line, so
+   for those windows the scrollback is scored against every transcript in
+   `~/.claude/projects/` using 8-word shingle overlap. The winner is normally 70
+   to 95 percent overlap with a near-zero runner-up.
+4. **Sanity-check.** Compare each window's last visible message to that
    session's last message. A mismatch means the window is showing an older point
    of the conversation, which usually means it died in an earlier incident and
    may already be live in another window.
-4. **Resume.** Send `cd '<project dir>' && claude --resume <id>` into that same
+5. **Resume.** Send `cd '<project dir>' && claude --resume <id>` into that same
    window, answer Claude Code's "resume from summary or full" prompt, and verify
    the session actually came up live.
 
@@ -107,7 +111,7 @@ w112: 7740 bytes
 
 $ python3 scripts/match.py /tmp/rescue
 3 windows vs 35 transcripts (excluding 009eaac1)
-w110 -> 9ad9a799  HIGH overlap= 83.5% end=100.0%  Onboard the new client account
+w110 -> 9ad9a799  EXACT (session id printed in window)  Onboard the new client account
 w111 -> 74784e7d  HIGH overlap= 91.9% end= 91.1%  Site redesign approved
 w112 -> 0a041851  LOW  overlap= 76.1% end=  0.0%  Scorecard landing page  [STALE? window
                                                   may show an older point]  [restored 2x]
